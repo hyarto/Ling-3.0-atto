@@ -49,6 +49,7 @@ def get_args(argv=None):
     p.add_argument("--max_docs", type=int, default=None)
     p.add_argument("--log_every", type=int, default=20)
     p.add_argument("--eval_every", type=int, default=100)
+    p.add_argument("--eval_batches", type=int, default=8)
     p.add_argument("--seed", type=int, default=0)
     return p.parse_args(argv)
 
@@ -142,7 +143,7 @@ def main(argv=None):
             t_last, tok_last = time.time(), 0
             hist.append({"step": step + 1, "loss": float(o["lm_loss"])})
         if (step + 1) % a.eval_every == 0 or step + 1 == a.steps:
-            vl = evaluate(model, val_loader, autocast_ctx)
+            vl = evaluate(model, val_loader, autocast_ctx, n=a.eval_batches)
             print(f"  [eval] step {step + 1} val_loss {vl:.4f} ppl {math.exp(vl):.2f}", flush=True)
             hist.append({"step": step + 1, "val_loss": vl})
 
