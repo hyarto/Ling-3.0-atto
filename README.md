@@ -100,15 +100,39 @@ python -m ling_atto.train --config atto_full --data <text file> --batch_size 4 -
 
 （Engram 对照不是参数等价的：多了 300K 参数。日志见 `logs/`。）synthetic 语料上 200 步后能正确续写 “The capital of France is Paris.”。
 
+## MoE 复查与改进（审计 → 小实验 → 改）
+
+脚本：`scripts/moe_audit.py`（静态 + 检查点动态审计）、`scripts/moe_ablation.py`（nano、TinyStories 前 2500 篇、300 步、2 个配对种子，12 个 run 共约 10 分钟，4 进程×1 线程）。日志在 `logs/moe_audit_*.txt`、`logs/moe_ablation.md`、`logs/ablation/`。
+
+| 问题 | 结论 | 处理 |
+|---|---|---|
+| 共享专家偏窄 | **属实**：atto_full 共享 240 = 单个路由专家宽，占激活 FFN 的 20%。但训练后 nano 的 \|shared\|/\|routed\| 输出范数比约 0.5–1.1，并不弱；等激活参数下加宽（B 对 A）val loss 无差异（+0.0015，噪声内） | 仍采用 2×：`I=200, shared=400, k=4`（激活 FFN 宽度仍 1200），E 32→38 使总参数基本不变（骨干 710.3M→715.0M，激活 318.0M→318.1M）。代价为零，但**本规模实验没测出收益** |
+| 共享专家无标量门 | **属实**（路由 ×2.5，共享 ×1）。加了 `shared_gate = none/scalar/token`，初始恒等。实验：scalar −0.0158、token −0.0108（对 D −0.0190），**无增益**；训练后 scalar 门 ≈1.00–1.02，模型不想改这个比例 | 保留为选项，默认 `none` |
+| n_group/topk_group | **属实且有害**：atto_full 的 (32,k=4,4组选2) 只能到达 28.8% 的专家子集；nano 基线训练后分组限制改变了 70–79% token 的专家集合。n_group=1 在两个种子上都更好（C 对 A −0.0179，D 对 B −0.0206） | `n_group=1, topk_group=1`（默认） |
+| 专家循环 / host 同步 | **属实**：每层 E 次 Python 迭代 + `counts.tolist()` + `bincount` + `update_bias` 里的 `.sum()>0`，每次前向 19 次同步 | `F.grouped_mm` 两次分组 GEMM，偏移在设备上算；bincount→scatter_add；update_bias 无分支；反排序+加权求和替代 `zeros_like+index_add_`；权重每层只 cast 一次。atto_full 尺寸单层 MoE（CPU fp32，1024 token）前后向 975→206 ms；loop 与 grouped 训练轨迹逐位一致（测试覆盖 fwd/bwd、门控、两种分组设置） |
+
+消融结果（val loss，越低越好；种子 0/1 均值，评测 40 batch）：
+
+| arm | 激活参数/token | val loss | Δ vs A |
+|---|---|---|---|
+| A 旧基线 (n_group=2) | 343,808 | 3.8513 | — |
+| B 共享 2× | 344,320 | 3.8529 | +0.0015 |
+| C A + n_group=1 | 343,808 | 3.8335 | −0.0179 |
+| D B + n_group=1 | 344,320 | 3.8323 | −0.0190 |
+| E D + 标量门 | 344,324 | 3.8355 | −0.0158 |
+| F D + token 门 | 344,576 | 3.8405 | −0.0108 |
+
+种子间差异约 ±0.003–0.02，所以只有 n_group=1 这一项的收益是明确的；共享加宽与门控在此微型规模下不可区分，不能据此宣称有提升。
+
 ## 布局
 
 ```
 ling_atto/{config,tokenizer,kda,layers,engram,model,optim,data,train}.py
-configs/{atto_full,nano}.json     scripts/{bench.py,collision_report.py,gh_push.sh}     tests/
+configs/{atto_full,nano}.json     scripts/{bench.py,collision_report.py,moe_audit.py,moe_ablation.py,gh_push.sh}     tests/
 ```
 
 ## 已知限制
 
 * 生成不带缓存（每步重算前缀），仅用于冒烟；KDA 的递推形式 (`kda_recurrent`) 已有，可用于 O(1) 解码。
-* MoE 分发有一次 `counts.tolist()` 的 host 同步；大规模训练可换 grouped-GEMM。
+* MoE 默认在 CUDA 上走 `F.grouped_mm`（无 host 同步）；CPU / 不满足对齐（H、I 需为 8 的倍数）时回退到逐专家循环（每层 1 次 host 同步）。CUDA 上的 grouped 路径只在 CPU fp32 上做了数值等价验证，未在 GPU 上计时。
 * 全量 `atto_full` 只做了 meta 设备的结构 / 参数量验证，未实际在 GPU 上训练。
