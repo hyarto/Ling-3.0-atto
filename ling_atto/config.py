@@ -79,6 +79,8 @@ class AttoConfig:
     moe_intermediate_size: int = 256
     moe_shared_expert_intermediate_size: int = 256
     routed_scaling_factor: float = 2.5
+    shared_gate: str = "none"  # "none" | "scalar" (learned per-layer scale exp(g), g0=0) | "token" (2*sigmoid(w.x), w0=0)
+    moe_dispatch: str = "auto"  # "auto" | "grouped" (sync-free grouped GEMM) | "loop" (per-expert, 1 host sync/layer)
     expert_bias_update_rate: float = 1e-3  # aux-loss-free balancing (noaux_tc)
     seq_aux_coef: float = 1e-3
     # --- engram ---

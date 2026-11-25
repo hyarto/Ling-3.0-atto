@@ -93,19 +93,31 @@ class SwiGLU(nn.Module):
         return self.down(F.silu(g) * u)
 
 
-class MoE(nn.Module):
-    """Fine-grained MoE: sigmoid scores, group-limited top-k on (score + bias), normalised top-k weights,
-    ``routed_scaling_factor``, one shared expert. Load balancing is aux-loss-free (a per-expert bias that
-    ``update_bias()`` nudges after each step) plus a tiny sequence-level auxiliary loss.
+_grouped_mm = getattr(F, "grouped_mm", None) or getattr(torch, "_grouped_mm", None)
 
-    Experts are stacked tensors and tokens are dispatched by sorting on expert id: no ModuleList and no
-    ``repeat_interleave`` copy of the activations (VRAM win vs the HF reference loop)."""
+
+class MoE(nn.Module):
+    """Fine-grained MoE: sigmoid scores, (optionally group-limited) top-k on (score + bias), normalised top-k
+    weights, ``routed_scaling_factor``, one shared expert. Load balancing is aux-loss-free (a per-expert bias
+    that ``update_bias()`` nudges after each step) plus a tiny sequence-level auxiliary loss.
+
+    Experts are stacked tensors; tokens are dispatched by sorting on expert id (no ModuleList, no
+    ``repeat_interleave`` copy).  Two expert-compute paths:
+
+    * ``grouped``: two grouped GEMMs (``F.grouped_mm``) over the expert-sorted tokens, offsets computed on
+      device -> **no Python per-expert loop and no host sync** (CUDA bf16, SM>=80; also runs on CPU fp32).
+    * ``loop``: per-expert matmuls; needs one ``counts.tolist()`` host sync per layer (fallback).
+
+    Shared expert: ``moe_shared_expert_intermediate_size`` wide, optionally multiplied by a learned gate
+    (``shared_gate``: "scalar" = exp(g) with g a per-layer scalar; "token" = 2*sigmoid(w.x)), both start at
+    exactly 1.0 so the gate only moves the shared/routed balance if the data asks for it."""
 
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
         E, H, I = cfg.num_experts, cfg.hidden_size, cfg.moe_intermediate_size
-        self.E, self.k, self.n_group, self.topk_group = E, cfg.num_experts_per_tok, cfg.n_group, cfg.topk_group
+        self.E, self.H, self.I = E, H, I
+        self.k, self.n_group, self.topk_group = cfg.num_experts_per_tok, cfg.n_group, cfg.topk_group
         self.scale = cfg.routed_scaling_factor
         self.router = nn.Parameter(torch.empty(E, H))
         nn.init.kaiming_uniform_(self.router, a=math.sqrt(5))
@@ -116,13 +128,21 @@ class MoE(nn.Module):
         for w in (self.w13, self.w2):
             nn.init.normal_(w, std=cfg.initializer_range)
         self.shared = SwiGLU(H, cfg.moe_shared_expert_intermediate_size) if cfg.moe_shared_expert_intermediate_size else None
+        self.gate_mode = cfg.shared_gate if self.shared is not None else "none"
+        if self.gate_mode == "scalar":
+            self.shared_gate = nn.Parameter(torch.zeros(()))  # 0-dim -> no weight decay
+        elif self.gate_mode == "token":
+            self.shared_gate = nn.Parameter(torch.zeros(H))
+        elif self.gate_mode != "none":
+            raise ValueError(f"shared_gate={self.gate_mode!r}")
 
-    def route(self, flat):
+    # ------------------------------------------------------------------ routing
+    def route(self, flat, use_groups: bool = True):
         logits = F.linear(flat.float(), self.router.float())
         scores = torch.sigmoid(logits)
         biased = scores + self.expert_bias
         N = flat.shape[0]
-        if self.n_group > 1:
+        if use_groups and self.n_group > 1:
             gs = biased.view(N, self.n_group, -1).topk(2, dim=-1)[0].sum(-1)
             top_g = gs.topk(self.topk_group, dim=-1)[1]
             mask = torch.zeros_like(gs).scatter_(1, top_g, 1.0)
@@ -133,6 +153,29 @@ class MoE(nn.Module):
         w = w / (w.sum(-1, keepdim=True) + 1e-20) * self.scale
         return idx, w, scores
 
+    # ------------------------------------------------------------------ experts
+    def _use_grouped(self, xs) -> bool:
+        mode = self.cfg.moe_dispatch
+        if mode == "loop" or _grouped_mm is None or self.H % 8 or self.I % 8:
+            return False
+        return True if mode == "grouped" else xs.is_cuda
+
+    def _experts(self, xs, counts):
+        dev = xs.device.type
+        dt = torch.get_autocast_dtype(dev) if torch.is_autocast_enabled(dev) else xs.dtype
+        xs = xs.to(dt)
+        w13, w2 = self.w13.to(dt), self.w2.to(dt)
+        if self._use_grouped(xs):
+            offs = counts.cumsum(0).to(torch.int32)
+            g, u = _grouped_mm(xs, w13, offs=offs).chunk(2, dim=-1)
+            return _grouped_mm(F.silu(g) * u, w2, offs=offs)
+        outs = []
+        for e, xe in enumerate(xs.split(counts.tolist())):  # the single host sync of the fallback path
+            if xe.shape[0]:
+                g, u = (xe @ w13[e]).chunk(2, dim=-1)
+                outs.append((F.silu(g) * u) @ w2[e])
+        return torch.cat(outs, 0)
+
     def forward(self, x):
         B, T, H = x.shape
         flat = x.reshape(-1, H)
@@ -140,24 +183,24 @@ class MoE(nn.Module):
         N, k = idx.shape
 
         flat_idx = idx.reshape(-1)
-        order = torch.argsort(flat_idx, stable=True)
-        tok = order // k
-        counts = torch.bincount(flat_idx, minlength=self.E)
+        order = torch.argsort(flat_idx, stable=True)  # slot (token*k + j) sorted by expert
+        counts = torch.zeros(self.E, dtype=torch.long, device=x.device).scatter_add_(
+            0, flat_idx, torch.ones_like(flat_idx)
+        )  # (bincount would sync on CUDA)
         if self.training:
             self.load += counts.float()
-        xs = flat[tok]
-        ys = torch.empty_like(xs)
-        sizes = counts.tolist()
-        s = 0
-        for e, n in enumerate(sizes):
-            if n:
-                g, u = (xs[s : s + n] @ self.w13[e].to(xs.dtype)).chunk(2, dim=-1)
-                ys[s : s + n] = (F.silu(g) * u) @ self.w2[e].to(xs.dtype)
-            s += n
-        ys = ys * w.reshape(-1)[order].unsqueeze(-1).to(ys.dtype)
-        y = torch.zeros_like(flat).index_add_(0, tok, ys)
+        ys = self._experts(flat[order // k], counts)  # [N*k, H] in expert-sorted order
+        inv = torch.empty_like(order)
+        inv[order] = torch.arange(order.numel(), device=order.device)
+        # un-sort + weighted sum over the k slots: deterministic, no atomics, no zeros_like + index_add_
+        y = (ys[inv].view(N, k, H) * w.unsqueeze(-1).to(ys.dtype)).sum(1)
         if self.shared is not None:
-            y = y + self.shared(flat)
+            sh = self.shared(flat)
+            if self.gate_mode == "scalar":
+                sh = sh * self.shared_gate.exp().to(sh.dtype)
+            elif self.gate_mode == "token":
+                sh = sh * (2 * torch.sigmoid(flat.float() @ self.shared_gate.float())).unsqueeze(-1).to(sh.dtype)
+            y = y.to(sh.dtype) + sh
 
         aux = x.new_zeros((), dtype=torch.float32)
         if self.training and self.cfg.seq_aux_coef > 0:
@@ -167,12 +210,11 @@ class MoE(nn.Module):
             ) * (self.E / (T * k))
             P = (scores / (scores.sum(-1, keepdim=True) + 1e-20)).view(B, T, self.E).mean(1)
             aux = self.cfg.seq_aux_coef * (f * P).sum(-1).mean()
-        return y.view(B, T, H), aux
+        return y.view(B, T, H).to(x.dtype), aux
 
     @torch.no_grad()
     def update_bias(self):
-        """aux-loss-free balancing: raise bias of under-used experts, lower the over-used ones."""
-        if self.load.sum() > 0:
-            err = self.load.mean() - self.load
-            self.expert_bias += self.cfg.expert_bias_update_rate * torch.sign(err)
+        """aux-loss-free balancing: raise bias of under-used experts, lower the over-used ones.
+        Branch-free (all-zero load -> sign(0) = 0), so there is no ``.sum() > 0`` host sync."""
+        self.expert_bias += self.cfg.expert_bias_update_rate * torch.sign(self.load.mean() - self.load)
         self.load.zero_()
