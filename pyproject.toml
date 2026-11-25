@@ -1,0 +1,16 @@
+[project]
+name = "ling-atto"
+version = "0.1.0"
+description = "Ling-3.0-atto: 0.7B hybrid KDA/MLA MoE backbone + 1.2B low-rank multi-hash Engram (LFM3 vocab)"
+requires-python = ">=3.10"
+dependencies = ["torch>=2.3", "numpy", "tokenizers"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+fast = ["flash-linear-attention"]  # optional Triton KDA kernels on CUDA
+
+[tool.setuptools]
+packages = ["ling_atto"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

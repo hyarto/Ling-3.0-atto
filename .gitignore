@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+assets/lfm3/
+assets/data/
+runs/
+*.pt
+*.safetensors
+.venv/
