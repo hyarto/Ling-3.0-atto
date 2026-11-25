@@ -21,7 +21,7 @@ import numpy as np
 import torch
 
 from .config import AttoConfig
-from .data import StreamLoader, build_stream, load_docs
+from .data import StreamLoader, build_stream, is_tokenized_source, load_docs, open_token_stream
 from .model import build_model, param_breakdown
 from .optim import build_optimizer
 from .tokenizer import LFMTokenizer, ReducedVocab
@@ -47,6 +47,7 @@ def get_args(argv=None):
     p.add_argument("--grad_ckpt", action="store_true")
     p.add_argument("--no_engram", action="store_true")
     p.add_argument("--max_docs", type=int, default=None)
+    p.add_argument("--max_tokens", type=int, default=None)
     p.add_argument("--log_every", type=int, default=20)
     p.add_argument("--eval_every", type=int, default=100)
     p.add_argument("--eval_batches", type=int, default=8)
@@ -95,18 +96,31 @@ def main(argv=None):
 
     # ---- data + vocab
     base = LFMTokenizer(a.tokenizer_dir)
-    docs = load_docs(a.data, a.max_docs)
-    if cfg.vocab_size < len(base):
-        vocab = ReducedVocab.build(base, docs, cfg.vocab_size)
-        vocab.save(out / "vocab_map.json")
-    else:
+    if is_tokenized_source(a.data):
+        if cfg.vocab_size < len(base):
+            raise ValueError(f"Pre-tokenized stream uses full LFM3 vocab ({len(base)}), "
+                             f"cannot run with smaller config vocab_size={cfg.vocab_size}")
         vocab = ReducedVocab.identity(base)
-    stream = build_stream(vocab, docs)
-    split = int(len(stream) * 0.95)
-    train_loader = StreamLoader(stream[:split], a.batch_size, a.seq_len, device, a.seed)
-    val_loader = StreamLoader(stream[split:], a.batch_size, a.seq_len, device, a.seed + 1)
-    print(f"[data] docs={len(docs)} tokens={len(stream):,} vocab={vocab.vocab_size} "
-          f"({'reduced' if vocab.vocab_size < len(base) else 'full LFM3'})")
+        stream = open_token_stream(a.data, max_tokens=a.max_tokens)
+        split = int(len(stream) * 0.95)
+        train_loader = StreamLoader(stream, a.batch_size, a.seq_len, device, a.seed, start=0, end=split)
+        val_loader = StreamLoader(stream, a.batch_size, a.seq_len, device, a.seed + 1, start=split, end=len(stream))
+        print(f"[data] pretokenized={a.data} tokens={len(stream):,} vocab={vocab.vocab_size} (full LFM3)")
+    else:
+        docs = load_docs(a.data, a.max_docs)
+        if cfg.vocab_size < len(base):
+            vocab = ReducedVocab.build(base, docs, cfg.vocab_size)
+            vocab.save(out / "vocab_map.json")
+        else:
+            vocab = ReducedVocab.identity(base)
+        stream = build_stream(vocab, docs)
+        if a.max_tokens is not None:
+            stream = stream[: a.max_tokens]
+        split = int(len(stream) * 0.95)
+        train_loader = StreamLoader(stream[:split], a.batch_size, a.seq_len, device, a.seed)
+        val_loader = StreamLoader(stream[split:], a.batch_size, a.seq_len, device, a.seed + 1)
+        print(f"[data] docs={len(docs)} tokens={len(stream):,} vocab={vocab.vocab_size} "
+              f"({'reduced' if vocab.vocab_size < len(base) else 'full LFM3'})")
 
     # ---- model
     model = build_model(cfg, vocab, device=device)

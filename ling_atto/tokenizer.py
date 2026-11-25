@@ -134,9 +134,14 @@ class ReducedVocab:
 
     def decode(self, ids: Sequence[int]) -> str:
         out = []
+        n = len(self.orig_ids)
         for i in ids:
-            o = int(self.orig_ids[int(i)])
-            out.append("<unk>" if int(i) == self.UNK and self.vocab_size < len(self.base) else self.base.decode([o]))
+            idx = int(i)
+            if idx < 0 or idx >= n:
+                out.append("<pad>")
+                continue
+            o = int(self.orig_ids[idx])
+            out.append("<unk>" if idx == self.UNK and self.vocab_size < len(self.base) else self.base.decode([o]))
         return "".join(out)
 
 

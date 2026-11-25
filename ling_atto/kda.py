@@ -228,9 +228,9 @@ class KimiDeltaAttention(nn.Module):
                 qn = F.normalize(q.float(), dim=-1) * dk**-0.5
                 kn = F.normalize(k.float(), dim=-1)
                 o, _ = fla_fn(
-                    q=qn.to(x.dtype), k=kn.to(x.dtype), v=v, g=self.gate(f), beta=torch.sigmoid(b.float()),
-                    initial_state=None, output_final_state=False, use_qk_l2norm_in_kernel=False,
-                    use_gate_in_kernel=False,
+                    q=qn.to(v.dtype), k=kn.to(v.dtype), v=v, g=self.gate(f), beta=torch.sigmoid(b.float()),
+                    scale=1.0, initial_state=None, output_final_state=False,
+                    use_qk_l2norm_in_kernel=False, use_gate_in_kernel=False,
                 )
             except Exception as e:  # signature drift between fla versions -> permanent fallback
                 print(f"[kda] fla kernel failed ({e!r}); falling back to torch chunk_kda")
