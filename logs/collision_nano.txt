@@ -1,0 +1,17 @@
+tokens=200,000 vocab=2048 compressed=1837 budget/layer=300,000 hidden=64
+
+wide-1head: rows=4,434  table=283,776 params  proj=16,832
+  order2: distinct=   33,315 buckets/head=   2,213 n-grams/bucket=  15.1  indistinguishable=100.000%
+  order3: distinct=   93,029 buckets/head=   2,221 n-grams/bucket=  41.9  indistinguishable=100.000%
+
+wide-4head: rows=3,850  table=246,400 params  proj=65,984
+  order2: distinct=   33,315 buckets/head=     461 n-grams/bucket=  72.3  indistinguishable= 0.000%
+  order3: distinct=   93,029 buckets/head=     487 n-grams/bucket= 191.0  indistinguishable= 0.000%
+
+lowrank-1head: rows=37,254  table=298,032 params  proj=2,496
+  order2: distinct=   33,315 buckets/head=  18,617 n-grams/bucket=   1.8  indistinguishable=83.515%
+  order3: distinct=   93,029 buckets/head=  18,637 n-grams/bucket=   5.0  indistinguishable=99.322%
+
+lowrank-4head (ours): rows=36,518  table=292,144 params  proj=8,640
+  order2: distinct=   33,315 buckets/head=   2,281 n-grams/bucket=  14.6  indistinguishable= 0.000%
+  order3: distinct=   93,029 buckets/head=   6,829 n-grams/bucket=  13.6  indistinguishable= 0.000%

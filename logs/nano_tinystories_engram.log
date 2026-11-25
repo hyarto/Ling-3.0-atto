@@ -1,0 +1,23 @@
+[data] docs=9975 tokens=1,987,260 vocab=2048 (reduced)
+[model] total=791,920 | backbone=491,264 | backbone_non_embedding=360,192 | embedding=131,072 | engram_total=300,656 | engram_tables=291,568 | active_per_token=343,808
+[model] layers: ['kda', 'kda', 'kda', 'kda', 'mla']  (KDA:MLA = 4:1)
+step     1 loss 7.6270 aux 0.00401 gn 1.54 lr 1.50e-04 tok/s 7,374
+step    50 loss 5.1569 aux 0.00414 gn 0.69 lr 2.98e-03 tok/s 8,987
+step   100 loss 4.1237 aux 0.00410 gn 0.64 lr 2.88e-03 tok/s 9,562
+  [eval] step 100 val_loss 4.0033 ppl 54.78
+step   150 loss 3.7370 aux 0.00405 gn 0.96 lr 2.68e-03 tok/s 9,744
+step   200 loss 3.4707 aux 0.00404 gn 0.78 lr 2.41e-03 tok/s 9,809
+  [eval] step 200 val_loss 3.5105 ppl 33.47
+step   250 loss 3.5092 aux 0.00403 gn 0.74 lr 2.09e-03 tok/s 9,492
+step   300 loss 3.4005 aux 0.00405 gn 0.79 lr 1.73e-03 tok/s 9,843
+  [eval] step 300 val_loss 3.2417 ppl 25.58
+step   350 loss 3.3015 aux 0.00402 gn 0.76 lr 1.37e-03 tok/s 9,644
+step   400 loss 3.4221 aux 0.00404 gn 0.85 lr 1.02e-03 tok/s 9,572
+  [eval] step 400 val_loss 3.1486 ppl 23.30
+step   450 loss 3.2176 aux 0.00403 gn 0.69 lr 7.27e-04 tok/s 9,087
+step   500 loss 3.1670 aux 0.00403 gn 0.76 lr 4.97e-04 tok/s 9,591
+  [eval] step 500 val_loss 2.9962 ppl 20.01
+step   550 loss 3.0020 aux 0.00404 gn 0.71 lr 3.51e-04 tok/s 9,308
+step   600 loss 3.0846 aux 0.00404 gn 0.74 lr 3.00e-04 tok/s 9,376
+  [eval] step 600 val_loss 3.0414 ppl 20.94
+[sample] Once upon a time, there was a little girl named Lily. She loved to play outside in the forest and explore the world. One day
