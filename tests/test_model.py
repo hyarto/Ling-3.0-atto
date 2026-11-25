@@ -72,3 +72,25 @@ def test_moe_bias_balancing_moves_toward_uniform():
     assert before[0] == 0  # the starved expert really received nothing at the start
     assert moe.expert_bias[0] > -5.0  # pushed up
     assert moe.load.std() <= before.std() + 1e-6 or moe.load[0] > 0
+
+
+def test_kda_core_checkpoint_gives_identical_grads():
+    grads = []
+    for ck in (False, True):
+        cfg = AttoConfig.load("nano")
+        cfg.kda_core_checkpoint = ck
+        torch.manual_seed(0)
+        m = build_model(cfg)
+        m.train()
+        x = torch.randint(2, 500, (2, 40)); x[:, 0] = 1
+        m(x, labels=x)["loss"].backward()
+        grads.append({n: p.grad.to_dense() if p.grad.is_sparse else p.grad for n, p in m.named_parameters()})
+    for n in grads[0]:
+        assert torch.allclose(grads[0][n], grads[1][n], atol=1e-5, rtol=1e-4), n
+
+
+def test_kda_rejects_unsafe_chunk_size():
+    cfg = AttoConfig.load("nano")
+    cfg.kda_chunk_size = 32
+    with pytest.raises(ValueError):
+        build_model(cfg)

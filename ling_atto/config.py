@@ -58,7 +58,8 @@ class AttoConfig:
     kda_head_dim: int = 128
     short_conv_kernel_size: int = 4
     kda_lower_bound: float = -5.0
-    kda_chunk_size: int = 16
+    kda_chunk_size: int = 16  # must satisfy chunk*|lower_bound|/2 <= 60 (fp32-safe re-centred exp)
+    kda_core_checkpoint: bool = True  # recompute the fp32 chunk intermediates in backward (big VRAM win)
     # --- MLA ---
     num_attention_heads: int = 8
     q_lora_rank: int = 256

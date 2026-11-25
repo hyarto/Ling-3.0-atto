@@ -64,12 +64,16 @@ def _scan(U0, W, qG, Aqk, decayL, kdecT, S0):
     return torch.stack(outs, 2), S
 
 
-def chunk_kda(q, k, v, g, beta, chunk_size: int = 16, initial_state=None, scan_checkpoint: bool = True):
+def chunk_kda(q, k, v, g, beta, chunk_size: int = 16, initial_state=None, scan_checkpoint: bool = True,
+              lower_bound: float | None = -5.0):
     """Chunked KDA. Same I/O as :func:`kda_recurrent`. Returns (o [B,T,H,dv] in q.dtype, final_state fp32)."""
     B, T, H, dk = q.shape
     dv = v.shape[-1]
     C = chunk_size
     out_dtype = q.dtype
+    if lower_bound is not None and C * abs(lower_bound) / 2 > _EXP_CLAMP:
+        raise ValueError(f"chunk_size={C} with gate lower bound {lower_bound} overflows the re-centred exp range; "
+                         f"use chunk_size <= {int(2 * _EXP_CLAMP / abs(lower_bound))}")
     pad = (-T) % C
     if pad:  # zero k/v/beta and zero log-decay => the state passes through padding untouched
         q, k, v, g = (F.pad(x, (0, 0, 0, 0, 0, pad)) for x in (q, k, v, g))
@@ -183,6 +187,9 @@ class KimiDeltaAttention(nn.Module):
         self.lower_bound = cfg.kda_lower_bound
         self.chunk = cfg.kda_chunk_size
         self.use_fla = cfg.use_fla
+        self.core_ckpt = cfg.kda_core_checkpoint
+        if self.chunk * abs(self.lower_bound) / 2 > _EXP_CLAMP:
+            raise ValueError("kda_chunk_size too large for kda_lower_bound (fp32 exp range); use <= 16 for -5")
 
     def gate(self, f):
         """Bounded per-channel log-decay in (lower_bound, 0): the 'safe gate' of Kimi Linear / Ling."""
@@ -192,6 +199,20 @@ class KimiDeltaAttention(nn.Module):
         g = self.lower_bound * torch.sigmoid(a * f)
         return g.view(B, T, self.H, self.dk)
 
+    def _core(self, q, k, v, f, b):
+        """Everything between the projections and the output norm. q,k,v,f,b arrive in the compute dtype;
+        all fp32 intermediates (normalised q/k, gates, per-chunk decays, A, Aqk, U, W ...) live only inside
+        this function, so it can be recomputed in backward instead of being stored (see ``core_ckpt``)."""
+        B, T = q.shape[:2]
+        H, dk = self.H, self.dk
+        q = F.normalize(q.float(), dim=-1) * dk**-0.5
+        k = F.normalize(k.float(), dim=-1)
+        g = self.gate(f)
+        beta = torch.sigmoid(b.float())
+        o, _ = chunk_kda(q, k, v, g, beta, chunk_size=self.chunk, scan_checkpoint=False,
+                         lower_bound=self.lower_bound)
+        return o.to(v.dtype)
+
     def forward(self, x):
         B, T, _ = x.shape
         H, dk, P = self.H, self.dk, self.P
@@ -199,17 +220,15 @@ class KimiDeltaAttention(nn.Module):
         qkv, f, gate_out, b = proj.split([3 * P, P, P, H], dim=-1)
         qkv = self.conv(qkv)
         q, k, v = (t.reshape(B, T, H, dk) for t in qkv.split(P, dim=-1))
-        q = F.normalize(q.float(), dim=-1) * dk**-0.5
-        k = F.normalize(k.float(), dim=-1)
-        g = self.gate(f)
-        beta = torch.sigmoid(b.float())
 
         o = None
         fla_fn = _try_fla() if (self.use_fla and x.is_cuda) else None
         if fla_fn is not None:
             try:
+                qn = F.normalize(q.float(), dim=-1) * dk**-0.5
+                kn = F.normalize(k.float(), dim=-1)
                 o, _ = fla_fn(
-                    q=q.to(x.dtype), k=k.to(x.dtype), v=v, g=g, beta=beta,
+                    q=qn.to(x.dtype), k=kn.to(x.dtype), v=v, g=self.gate(f), beta=torch.sigmoid(b.float()),
                     initial_state=None, output_final_state=False, use_qk_l2norm_in_kernel=False,
                     use_gate_in_kernel=False,
                 )
@@ -217,6 +236,9 @@ class KimiDeltaAttention(nn.Module):
                 print(f"[kda] fla kernel failed ({e!r}); falling back to torch chunk_kda")
                 _FLA_STATE["fn"] = None
         if o is None:
-            o, _ = chunk_kda(q, k, v, g, beta, chunk_size=self.chunk)
+            if self.core_ckpt and self.training and torch.is_grad_enabled():
+                o = checkpoint(self._core, q, k, v, f, b, use_reentrant=False)
+            else:
+                o = self._core(q, k, v, f, b)
         o = self.o_norm(o) * torch.sigmoid(gate_out).view(B, T, H, dk).to(o.dtype)
         return self.o_proj(o.reshape(B, T, P).to(x.dtype))
