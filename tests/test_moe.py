@@ -73,7 +73,8 @@ def test_scalar_gate_gets_grad_and_no_decay():
 
 def test_update_bias_balances_without_sync():
     m = MoE(_cfg())
-    m.load.copy_(torch.tensor([10.0, 0, 0, 0, 0, 0, 0, 0]))
+    m.load.zero_()
+    m.load[0] = 10.0
     m.update_bias()
     assert m.expert_bias[0] < 0 < m.expert_bias[1] and m.load.sum() == 0
     before = m.expert_bias.clone()

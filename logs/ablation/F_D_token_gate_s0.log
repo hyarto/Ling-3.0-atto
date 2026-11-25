@@ -1,0 +1,7 @@
+[data] docs=2500 tokens=495,380 vocab=2048 (reduced)
+[model] total=792,688 | backbone=492,032 | backbone_non_embedding=360,960 | embedding=131,072 | engram_total=300,656 | engram_tables=291,568 | active_per_token=344,576
+[model] layers: ['kda', 'kda', 'kda', 'kda', 'mla']  (KDA:MLA = 4:1)
+step     1 loss 7.6469 aux 0.00402 gn 1.60 lr 1.50e-04 tok/s 3,890
+step   300 loss 3.3841 aux 0.00404 gn 0.86 lr 3.00e-04 tok/s 4,198
+  [eval] step 300 val_loss 3.8543 ppl 47.19
+[sample] Once upon a time there was a little boy named Timmy. Timmy loved to play with his<unk>. They loved to play outside and

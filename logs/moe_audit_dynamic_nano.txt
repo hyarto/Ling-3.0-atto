@@ -1,0 +1,16 @@
+### A_base_n_group_2__s0
+[3] E=8 k=2 n_group=2 topk_group=1: 42.9% of the C(E,k) expert subsets are reachable by the router
+[dynamic] /tmp/ablation/A_base_n_group_2__s0/ckpt.pt
+  layer  group-limit-changes-set  |shared|/|routed|  maxload/mean  load-entropy  shared-gate
+  L1                      76.8%              1.13          1.12         0.999           -
+  L2                      75.5%              0.77          1.12         0.997           -
+  L3                      79.0%              1.16          1.12         0.999           -
+  L4                      69.9%              0.47          1.09         0.999           -
+### E_D_scalar_gate_s0
+[3] E=10 k=2 n_group=1 topk_group=1: 100.0% of the C(E,k) expert subsets are reachable by the router
+[dynamic] /tmp/ablation/E_D_scalar_gate_s0/ckpt.pt
+  layer  group-limit-changes-set  |shared|/|routed|  maxload/mean  load-entropy  shared-gate
+  L1                       0.0%              1.00          1.08         1.000        1.02
+  L2                       0.0%              0.57          1.06         1.000        1.00
+  L3                       0.0%              0.58          1.08         0.999        1.01
+  L4                       0.0%              0.59          1.09         0.999        1.00

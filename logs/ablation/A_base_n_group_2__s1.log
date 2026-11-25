@@ -1,0 +1,7 @@
+[data] docs=2500 tokens=495,380 vocab=2048 (reduced)
+[model] total=791,920 | backbone=491,264 | backbone_non_embedding=360,192 | embedding=131,072 | engram_total=300,656 | engram_tables=291,568 | active_per_token=343,808
+[model] layers: ['kda', 'kda', 'kda', 'kda', 'mla']  (KDA:MLA = 4:1)
+step     1 loss 7.6361 aux 0.00402 gn 1.59 lr 1.50e-04 tok/s 3,860
+step   300 loss 3.1336 aux 0.00405 gn 1.02 lr 3.00e-04 tok/s 4,294
+  [eval] step 300 val_loss 3.8448 ppl 46.75
+[sample] Once upon a time, there was a little boy named Tom. She loved to play with her friends. One day she wanted to make his

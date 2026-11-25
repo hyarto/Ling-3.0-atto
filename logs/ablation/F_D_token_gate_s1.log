@@ -1,0 +1,7 @@
+[data] docs=2500 tokens=495,380 vocab=2048 (reduced)
+[model] total=792,688 | backbone=492,032 | backbone_non_embedding=360,960 | embedding=131,072 | engram_total=300,656 | engram_tables=291,568 | active_per_token=344,576
+[model] layers: ['kda', 'kda', 'kda', 'kda', 'mla']  (KDA:MLA = 4:1)
+step     1 loss 7.6433 aux 0.00403 gn 1.54 lr 1.50e-04 tok/s 3,811
+step   300 loss 3.1069 aux 0.00404 gn 0.79 lr 3.00e-04 tok/s 4,217
+  [eval] step 300 val_loss 3.8268 ppl 45.92
+[sample] Once upon a time there was a old little girl. She was very excited and was very happy of the<unk> and he was not sad.

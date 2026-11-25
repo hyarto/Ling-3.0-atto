@@ -1,0 +1,7 @@
+[data] docs=2500 tokens=495,380 vocab=2048 (reduced)
+[model] total=791,920 | backbone=491,264 | backbone_non_embedding=360,192 | embedding=131,072 | engram_total=300,656 | engram_tables=291,568 | active_per_token=343,808
+[model] layers: ['kda', 'kda', 'kda', 'kda', 'mla']  (KDA:MLA = 4:1)
+step     1 loss 7.6314 aux 0.00402 gn 1.55 lr 1.50e-04 tok/s 3,649
+step   300 loss 3.3411 aux 0.00404 gn 0.76 lr 3.00e-04 tok/s 4,222
+  [eval] step 300 val_loss 3.8324 ppl 46.17
+[sample] Once upon a time, there was a little girl named Lily. She loved to play in the sun. One day, Timmy's mom

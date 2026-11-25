@@ -1,0 +1,8 @@
+== static audit: atto_full
+[1] shared width 400 vs routed width 200 (ratio 2.00x); activated FFN width/token = 4*200+400 = 1200; shared share = 33.3%
+[2] shared gate = 'none'; routed path scale = 2.5 (shared has NO scale)
+[3] E=38 k=4 n_group=1 topk_group=1: 100.0% of the C(E,k) expert subsets are reachable by the router
+[4] dispatch='auto': loop path = 38 python iters + 1 host sync per MoE layer -> 722 iters, 19 syncs per fwd (grouped path: 0 / 0)
+== op count / time of one MoE layer fwd+bwd on CPU (atto_full, 1024 tokens; host-sync cost is invisible on CPU)
+  dispatch=loop     aten ops= 4078  1197.56 ms
+  dispatch=grouped  aten ops= 3484   189.10 ms

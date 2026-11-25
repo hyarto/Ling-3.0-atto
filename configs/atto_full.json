@@ -22,12 +22,12 @@
   "gated_attention": true,
   "intermediate_size": 2560,
   "first_k_dense_replace": 1,
-  "num_experts": 32,
+  "num_experts": 38,
   "num_experts_per_tok": 4,
-  "n_group": 4,
-  "topk_group": 2,
-  "moe_intermediate_size": 240,
-  "moe_shared_expert_intermediate_size": 240,
+  "n_group": 1,
+  "topk_group": 1,
+  "moe_intermediate_size": 200,
+  "moe_shared_expert_intermediate_size": 400,
   "routed_scaling_factor": 2.5,
   "expert_bias_update_rate": 0.001,
   "seq_aux_coef": 0.001,
@@ -54,5 +54,7 @@
   },
   "gradient_checkpointing": false,
   "ce_chunk_tokens": 4096,
-  "use_fla": true
+  "use_fla": true,
+  "shared_gate": "none",
+  "moe_dispatch": "auto"
 }

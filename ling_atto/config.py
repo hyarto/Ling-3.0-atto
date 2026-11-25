@@ -72,12 +72,12 @@ class AttoConfig:
     # --- FFN / MoE ---
     intermediate_size: int = 3072  # dense FFN (first_k_dense_replace layers)
     first_k_dense_replace: int = 1
-    num_experts: int = 32
+    num_experts: int = 38  # E*I+shared kept ~= old 32*240+240 while the activated FFN width/token stays 1200
     num_experts_per_tok: int = 4
-    n_group: int = 4
-    topk_group: int = 2
-    moe_intermediate_size: int = 256
-    moe_shared_expert_intermediate_size: int = 256
+    n_group: int = 1  # group-limited routing only saves cross-node comms; on 1 GPU it just hides experts (see logs/)
+    topk_group: int = 1
+    moe_intermediate_size: int = 200
+    moe_shared_expert_intermediate_size: int = 400  # 2x one routed expert
     routed_scaling_factor: float = 2.5
     shared_gate: str = "none"  # "none" | "scalar" (learned per-layer scale exp(g), g0=0) | "token" (2*sigmoid(w.x), w0=0)
     moe_dispatch: str = "auto"  # "auto" | "grouped" (sync-free grouped GEMM) | "loop" (per-expert, 1 host sync/layer)
