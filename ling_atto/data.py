@@ -8,6 +8,7 @@ Sources
 """
 from __future__ import annotations
 
+import os
 import random
 import urllib.request
 from pathlib import Path
@@ -125,12 +126,22 @@ class ShardedTokenStream:
         return np.concatenate(chunks)
 
 
+def _iter_bin_files(root: Path) -> list[Path]:
+    out: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and ".tmp" not in d)
+        for fn in sorted(filenames):
+            if fn.endswith(".bin") and not fn.startswith(".") and ".tmp" not in fn:
+                out.append(Path(dirpath) / fn)
+    return sorted(out)
+
+
 def is_tokenized_source(source: str) -> bool:
     p = Path(source)
     if p.is_file() and p.suffix in {".bin", ".npy"}:
         return True
     if p.is_dir():
-        return any(p.rglob("*.bin"))
+        return len(_iter_bin_files(p)) > 0
     return False
 
 
@@ -142,11 +153,7 @@ def open_token_stream(source: str | Path, max_tokens: int | None = None):
     if p.is_file() and p.suffix == ".bin":
         return ShardedTokenStream([p], max_tokens=max_tokens)
     if p.is_dir():
-        paths = sorted(
-            f for f in p.rglob("*.bin")
-            if not any(part.startswith(".") or ".tmp" in part for part in f.relative_to(p).parts)
-        )
-        return ShardedTokenStream(paths, max_tokens=max_tokens)
+        return ShardedTokenStream(_iter_bin_files(p), max_tokens=max_tokens)
     raise ValueError(f"Unsupported tokenized source: {source}")
 
 
@@ -183,5 +190,58 @@ class StreamLoader:
             rows = [self.stream.read_window(i, self.T) for i in ix.tolist()]
         else:
             rows = [np.asarray(self.stream[i : i + self.T], dtype=np.int64) for i in ix.tolist()]
+        x = torch.from_numpy(np.stack(rows))
+        return x.to(self.device, non_blocking=True)
+
+
+def split_sequence_indices(total_tokens: int, seq_len: int, val_seqs: int = 4096, seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
+    """Split non-overlapping sequences uniformly into shuffled train indices and evenly-spaced val indices."""
+    n_seqs = total_tokens // seq_len
+    if n_seqs < 2:
+        raise ValueError(f"Corpus too short ({total_tokens} tokens) for seq_len={seq_len}")
+    n_val = min(val_seqs, max(1, n_seqs // 20))
+    val_idx = np.unique(np.linspace(0, n_seqs - 1, n_val, dtype=np.int64))
+    mask = np.ones(n_seqs, dtype=bool)
+    mask[val_idx] = False
+    train_idx = np.flatnonzero(mask)
+    rng = np.random.default_rng(seed)
+    rng.shuffle(train_idx)
+    return train_idx, val_idx
+
+
+class IndexedSequenceLoader:
+    """Deterministic sequential loader over shuffled non-overlapping sequence indices (for exact-epoch runs)."""
+
+    def __init__(
+        self,
+        stream: np.ndarray | ShardedTokenStream,
+        seq_ids: np.ndarray,
+        batch_size: int,
+        seq_len: int,
+        device,
+        cursor: int = 0,
+    ):
+        self.stream = stream
+        self.seq_ids = seq_ids
+        self.B, self.T, self.device = batch_size, seq_len, device
+        self.cursor = cursor
+
+    def __len__(self) -> int:
+        return len(self.seq_ids)
+
+    def set_cursor(self, cursor: int) -> None:
+        self.cursor = cursor
+
+    def next(self) -> torch.Tensor:
+        n = len(self.seq_ids)
+        rows = []
+        for _ in range(self.B):
+            sid = int(self.seq_ids[self.cursor % n])
+            self.cursor += 1
+            pos = sid * self.T
+            if isinstance(self.stream, ShardedTokenStream):
+                rows.append(self.stream.read_window(pos, self.T))
+            else:
+                rows.append(np.asarray(self.stream[pos : pos + self.T], dtype=np.int64))
         x = torch.from_numpy(np.stack(rows))
         return x.to(self.device, non_blocking=True)
